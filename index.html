@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Out-of-Region Decision Helper</title>
+<script src="https://cdn.amplitude.com/script/YOUR_API_KEY_HERE.js"></script>
+<script>
+  window.amplitude && window.amplitude.init('YOUR_API_KEY_HERE', { autocapture: { pageViews: true, sessions: true } });
+</script>
+<style>
+  :root {
+    --cream: #FAF6EC;
+    --paper: #FFFDF7;
+    --ink: #262420;
+    --ink-soft: #5C594F;
+    --citrus: #E8B923;
+    --citrus-dark: #C89610;
+    --green: #1F3A34;
+    --green-soft: #3F6B5E;
+    --red: #B23A2E;
+    --red-soft: #F4E2DF;
+    --green-chip: #E4EFE9;
+    --border: #E4DFCF;
+    --shadow: 0 2px 0 rgba(38,36,32,0.06), 0 8px 24px rgba(38,36,32,0.06);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--cream);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px 64px;
+  }
+
+  .app {
+    width: 100%;
+    max-width: 640px;
+  }
+
+  header.top {
+    margin-bottom: 24px;
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--green-soft);
+    background: var(--green-chip);
+    padding: 4px 10px;
+    border-radius: 100px;
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-size: 26px;
+    line-height: 1.25;
+    margin: 0 0 8px;
+    color: var(--green);
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    color: var(--ink-soft);
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  /* Progress rail */
+  .rail {
+    display: flex;
+    gap: 6px;
+    margin: 24px 0 20px;
+  }
+  .rail-seg {
+    height: 4px;
+    flex: 1;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .rail-seg.done { background: var(--citrus); }
+  .rail-seg.active { background: var(--citrus-dark); }
+
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 26px;
+    box-shadow: var(--shadow);
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .step-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--citrus-dark);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+
+  .question {
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--ink);
+    margin: 0 0 6px;
+  }
+
+  .helper-text {
+    font-size: 14px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+    margin: 0 0 18px;
+  }
+
+  .zip-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    width: fit-content;
+  }
+  .zip-chip.red { background: var(--red-soft); color: var(--red); border: 1px solid rgba(178,58,46,0.25); }
+  .zip-chip.clear { background: var(--green-chip); color: var(--green-soft); border: 1px solid rgba(63,107,94,0.25); }
+  .zip-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+  .options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: auto;
+  }
+
+  .opt-btn {
+    text-align: left;
+    background: var(--paper);
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+  }
+  .opt-btn:hover {
+    border-color: var(--citrus-dark);
+    background: #FFFBF0;
+  }
+  .opt-btn:active { transform: scale(0.99); }
+  .opt-btn .sub {
+    display: block;
+    font-weight: 400;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 3px;
+  }
+
+  .nav-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 20px;
+  }
+
+  .back-btn {
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 8px 4px;
+  }
+  .back-btn:hover { color: var(--ink); }
+  .back-btn:disabled { opacity: 0; pointer-events: none; }
+
+  .restart-btn {
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    font-size: 13px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  /* Result screens */
+  .result-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: 100px;
+    margin-bottom: 14px;
+    width: fit-content;
+  }
+  .badge-oor { background: var(--red-soft); color: var(--red); }
+  .badge-onboard { background: var(--green-chip); color: var(--green-soft); }
+  .badge-wait { background: #FBF0D1; color: var(--citrus-dark); }
+  .badge-none { background: #EDE9DD; color: var(--ink-soft); }
+
+  .result-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--green);
+    margin: 0 0 10px;
+    line-height: 1.35;
+  }
+
+  .result-steps {
+    margin: 0 0 16px;
+    padding-left: 20px;
+    color: var(--ink);
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+  .result-steps li { margin-bottom: 6px; }
+
+  .template-block {
+    background: var(--cream);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 10px 0 16px;
+    position: relative;
+  }
+  .template-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  .template-text {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--ink);
+    white-space: pre-wrap;
+  }
+  .copy-btn {
+    margin-top: 10px;
+    font-size: 12.5px;
+    font-weight: 700;
+    background: var(--green);
+    color: var(--paper);
+    border: none;
+    padding: 7px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .copy-btn:hover { background: var(--green-soft); }
+  .copy-btn.copied { background: var(--citrus-dark); }
+
+  .note {
+    font-size: 13px;
+    color: var(--ink-soft);
+    background: var(--green-chip);
+    border-radius: 10px;
+    padding: 10px 14px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+
+  .footer-note {
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin-top: 18px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="eyebrow">🍋 Specialist tool</div>
+    <h1>Out-of-Region Decision Helper</h1>
+    <p class="subtitle">Walk through this once a client's zip shows up red. It follows the current out-of-region steps end to end.</p>
+  </header>
+
+  <div class="rail" id="rail"></div>
+
+  <div class="card" id="card"></div>
+
+  <p class="footer-note">Covers Atlanta, Baltimore, Boston, Charlotte, Columbus, Detroit, Tampa, Washington D.C., New York City, Philadelphia, and all of New Jersey.<br>Not sure about a step? Ask in #helpline_ops.</p>
+</div>
+
+<script>
+const state = {
+  step: 'address',
+  history: []
+};
+
+const railSteps = ['address', 'zip', 'checks', 'transport', 'resources', 'distance', 'result'];
+
+function renderRail(current) {
+  const rail = document.getElementById('rail');
+  rail.innerHTML = '';
+  const normalized = current.startsWith('zip-clear') ? 'zip'
+    : current.startsWith('address-') ? 'address'
+    : current === 'nj-check' || current === 'nj-resources-check' || current.startsWith('nj-result') ? 'checks'
+    : current.startsWith('oor-') || current === 'onboard-caveat' ? 'result'
+    : current;
+  const idx = railSteps.indexOf(normalized);
+  railSteps.forEach((s, i) => {
+    const seg = document.createElement('div');
+    seg.className = 'rail-seg';
+    if (i < idx) seg.classList.add('done');
+    if (i === idx) seg.classList.add('active');
+    rail.appendChild(seg);
+  });
+}
+
+function goTo(step) {
+  state.history.push(state.step);
+  state.step = step;
+  render();
+}
+
+function goBack() {
+  if (state.history.length === 0) return;
+  state.step = state.history.pop();
+  render();
+}
+
+function restart() {
+  state.step = 'address';
+  state.history = [];
+  state.travelMode = null;
+  state.travelCutoff = null;
+  state.backstopMiles = null;
+  state.clientAddr = null;
+  state.destCity = null;
+  state.destCustom = null;
+  state.mapShown = false;
+  state.closestResource = null;
+  render();
+}
+
+function copyText(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const original = btn.textContent;
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1500);
+  }).catch(() => {
+    btn.textContent = 'Select the text above to copy';
+  });
+}
+
+
+async function fetchLiveResourceCheck(zip, radiusKm) {
+  try {
+    // Pass the zip straight to /api/resources — it resolves location server-side,
+    // no need for a separate geocoding step.
+    const resRes = await fetch(`https://platform.foodhelpline.org/api/resources?location=${zip}&nearbyResourcesRadius=${radiusKm}&take=40`);
+    if (!resRes.ok) {
+      console.warn('Out of Region Helper: /api/resources returned status', resRes.status);
+      return null;
+    }
+    const resData = await resRes.json();
+    const allResources = (resData.json && resData.json.resources) || resData.resources || [];
+    if (allResources.length === 0 && !resData.json && !resData.resources) {
+      console.warn('Out of Region Helper: unexpected /api/resources shape', resData);
+    }
+    // Only count actual walk-in resources (pantries, soup kitchens), not SNAP
+    // applications or other non-food-distribution resource types.
+    const resources = allResources.filter(r =>
+      r.resourceType && (r.resourceType.id === 'FOOD_PANTRY' || r.resourceType.id === 'SOUP_KITCHEN')
+    );
+    return resources;
+  } catch (e) {
+    return null; // network blocked, CORS issue, or endpoint unavailable, fail gracefully
+  }
+}
+
+const templates = {
+  buildingNumber: `Hi there! 👋 Thanks for reaching out to Lemontree 🍋 In order to find pantries closer to you, could you provide the building/house number on {ADDRESS}, or the name of a street that crosses it, please? 😊`,
+  addressFollowUp: `Thank you for providing that information! 😊 In order for me to find resources closer to you, I'll need a full address or the nearest cross streets with the zip code 👍 If you don't want to share your personal address, feel free to share the address of a nearby school or business instead!`,
+  outOfRegion: `Hi, thank you so much for reaching out to Lemontree! Unfortunately, our services don't cover your area at this time 😓 I'm sorry I can't help directly, but you can try searching on https://ltree.co/s/hfa to find resources near you 🙏`,
+  unreliable: `Hi there, thanks so much for reaching out to Lemontree! Unfortunately, we don't have many resources in this neighborhood, and the information that we do have might not be reliable 😓 Would you like me to send you what I've found anyway?`,
+  njResearchWithResources: `Client Platform Link: [paste link]\nZip Code(s): [zip]\nSituation: Client is in New Jersey (fully covered), zip is showing red/out of region.\nAction Requested: Please add this zip code to the database.`,
+  njResearchNoResources: `Client Platform Link: [paste link]\nZip Code(s): [zip]\nSituation: Client is in New Jersey (fully covered), zip is showing red/out of region, and no resources were found nearby.\nAction Requested: Please add this zip code to the database, and look into resource coverage for this area. Flagging in case this is a data gap.`
+};
+
+function trackEvent(name, props) {
+  try {
+    if (window.amplitude && typeof window.amplitude.track === 'function') {
+      window.amplitude.track(name, props || {});
+    }
+  } catch (e) { /* fail silently, never break the tool over analytics */ }
+}
+
+function render() {
+  if (state.step !== state._lastTrackedStep) {
+    trackEvent('Out of Region Helper Step Viewed', {
+      step: state.step,
+      travelMode: state.travelMode || null,
+      backstopMiles: state.backstopMiles || null
+    });
+    state._lastTrackedStep = state.step;
+  }
+  renderRail(state.step);
+  const card = document.getElementById('card');
+  card.innerHTML = '';
+
+  const back = () => {
+    const b = document.createElement('button');
+    b.className = 'back-btn';
+    b.textContent = '← Back';
+    b.disabled = state.history.length === 0;
+    b.onclick = goBack;
+    return b;
+  };
+
+  if (state.step === 'address') {
+    card.innerHTML = `
+      <div class="step-label">Step 1</div>
+      <p class="question">Is the client's address complete?</p>
+      <p class="helper-text">Check for a building or house number and a valid zip code on file.</p>
+      <div class="options">
+        <button class="opt-btn" data-go="zip">Yes, it's complete<span class="sub">Has a number and a zip. Move on to the zip check.</span></button>
+        <button class="opt-btn" data-go="address-incomplete">No, something's missing<span class="sub">Missing a building number, or not enough to search.</span></button>
+      </div>
+    `;
+  }
+
+  else if (state.step === 'address-incomplete') {
+    card.innerHTML = `
+      <div class="step-label">Step 1 · Follow-up needed</div>
+      <p class="question">What's missing from the address?</p>
+      <div class="options" id="opt-container"></div>
+    `;
+    const container = card.querySelector('#opt-container');
+
+    const buildingBtn = document.createElement('button');
+    buildingBtn.className = 'opt-btn';
+    buildingBtn.innerHTML = `Just the building/house number<span class="sub">Everything else looks usable.</span>`;
+    buildingBtn.onclick = () => showTemplateResult('buildingNumber', 'Building Number template');
+    container.appendChild(buildingBtn);
+
+    const fullBtn = document.createElement('button');
+    fullBtn.className = 'opt-btn';
+    fullBtn.innerHTML = `More than that's missing<span class="sub">Not enough to search at all.</span>`;
+    fullBtn.onclick = () => showTemplateResult('addressFollowUp', 'Address Follow-up template');
+    container.appendChild(fullBtn);
+
+    card.appendChild(back());
+  }
+
+  else if (state.step === 'zip') {
+    card.innerHTML = `
+      <div class="step-label">Step 2</div>
+      <p class="question">Is the zip code highlighted in red in Platform?</p>
+      <p class="helper-text">Red means it may be outside our regions and needs a closer look before onboarding.</p>
+      <div class="options">
+        <button class="opt-btn" data-go="zip-clear">No, it's not red<span class="sub">Nothing flags it as out of region.</span></button>
+        <button class="opt-btn" data-go="nj-check">Yes, it's red<span class="sub">Let's check a couple things first.</span></button>
+      </div>
+    `;
+    card.appendChild(back());
+  }
+
+  else if (state.step === 'zip-clear') {
+    card.innerHTML = `
+      <div class="result-badge badge-none">Not an out-of-region case</div>
+      <p class="result-title">Proceed as normal.</p>
+      <p class="helper-text">This SOP only applies when the zip is flagged red. Since it isn't, go ahead with regular onboarding and referrals.</p>
+    `;
+    card.appendChild(back());
+    const restart = document.createElement('button');
+    restart.className = 'restart-btn';
+    restart.textContent = 'Start over';
+    restart.style.marginTop = '12px';
+    restart.onclick = () => { state.history = []; state.step = 'address'; state.travelMode = null; state.travelCutoff = null; state.backstopMiles = null; state.clientAddr = null; state.destCity = null; state.destCustom = null; state.mapShown = false; state.closestResource = null; render(); };
+    card.appendChild(restart);
+  }
+
+  else if (state.step === 'distance') {
+    const hasResource = !!state.closestResource;
+    if (!hasResource && !state.destCity) state.destCity = 'Atlanta, GA';
+
+    const questionText = hasResource
+      ? `Is the client's address more than 30 km (about 18.6 miles) from ${state.closestResource.name}?`
+      : `Is the client's address more than 30 km (about 18.6 miles) from our nearest region?`;
+    const answerOptions = `
+        <button class="opt-btn" data-go="onboard-caveat">No, within 30 km (18.6 mi)</button>
+        <button class="opt-btn" data-go="oor-distance">Yes, more than 30 km (18.6 mi)</button>
+      `;
+
+    const destPickerHtml = hasResource ? `
+      <div class="note" style="margin-bottom:14px;">Measuring against the closest qualifying resource from Step 5: <strong>${state.closestResource.name}</strong>.</div>
+    ` : `
+      <div style="margin-bottom:14px;">
+        <label style="font-size:13px; font-weight:600; color:var(--ink-soft); display:block; margin-bottom:4px;">Closest covered city</label>
+        <select id="dest-city" style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit; background:var(--paper);">
+          ${['Atlanta, GA','Baltimore, MD','Boston, MA','Charlotte, NC','Columbus, OH','Detroit, MI','Tampa, FL','Washington, DC','New York, NY','Philadelphia, PA']
+            .map(c => `<option value="${c}" ${state.destCity === c ? 'selected' : ''}>${c}</option>`).join('')}
+          <option value="custom" ${state.destCity === 'custom' ? 'selected' : ''}>All of NJ — type nearest NJ city</option>
+        </select>
+        <input type="text" id="dest-custom" placeholder="e.g. Trenton, NJ" value="${state.destCustom || ''}"
+          style="width:100%; margin-top:8px; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit; ${state.destCity === 'custom' ? '' : 'display:none;'}">
+      </div>
+    `;
+
+    card.innerHTML = `
+      <div class="zip-chip red"><span class="dot"></span>Zip flagged · ${state.travelMode || 'mode not set'}</div>
+      <div class="step-label">Step 6 · Check the distance</div>
+      <p class="question">${questionText}</p>
+      <p class="helper-text">${hasResource
+        ? 'Enter the client\u2019s address and the map will load right here. Read the mileage shown on the map (not drive time) to answer.'
+        : 'Enter the client\u2019s address, pick the closest covered city, and the map will load right here. Read the mileage shown on the map (not drive time) to answer.'}</p>
+
+      <div style="margin-bottom:10px;">
+        <label style="font-size:13px; font-weight:600; color:var(--ink-soft); display:block; margin-bottom:4px;">Client's address</label>
+        <input type="text" id="client-addr" placeholder="e.g. 142 Elm St, Reading, PA" value="${state.clientAddr || ''}"
+          style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit;">
+      </div>
+
+      ${destPickerHtml}
+
+      <button class="copy-btn" id="show-route-btn" style="margin-bottom:14px; background:var(--citrus-dark);">Show route</button>
+
+      <div id="map-holder"></div>
+
+      <div class="options" id="distance-answer" style="display:${state.mapShown ? 'flex' : 'none'};">
+        ${answerOptions}
+      </div>
+    `;
+
+    const destSelect = card.querySelector('#dest-city');
+    const destCustom = card.querySelector('#dest-custom');
+    if (destSelect) {
+      destSelect.addEventListener('change', () => {
+        state.destCity = destSelect.value;
+        destCustom.style.display = destSelect.value === 'custom' ? 'block' : 'none';
+      });
+    }
+
+    const getDest = () => hasResource
+      ? state.closestResource.address
+      : (destSelect.value === 'custom' ? destCustom.value.trim() : destSelect.value);
+
+    const renderMap = (addr, dest) => {
+      const src = `https://maps.google.com/maps?saddr=${encodeURIComponent(dest)}&daddr=${encodeURIComponent(addr)}&output=embed`;
+      card.querySelector('#map-holder').innerHTML = `
+        <iframe src="${src}" width="100%" height="280" style="border:1px solid var(--border); border-radius:10px; margin-bottom:10px;" loading="lazy"></iframe>
+        <button class="copy-btn" id="popup-route-btn" style="background:var(--green); margin-bottom:10px;">Map not loading? Open in a small window</button>
+        <p class="helper-text" style="margin-bottom:14px;">Read the mileage shown on the map, then answer below.</p>
+      `;
+      card.querySelector('#popup-route-btn').addEventListener('click', () => {
+        window.open(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(dest)}&destination=${encodeURIComponent(addr)}`,
+          'routePopup', 'width=520,height=640');
+      });
+    };
+
+    card.querySelector('#show-route-btn').addEventListener('click', () => {
+      const addr = card.querySelector('#client-addr').value.trim();
+      const dest = getDest();
+      if (!addr || !dest) {
+        card.querySelector('#map-holder').innerHTML = `<p class="helper-text" style="color:var(--red);">Enter both the client's address and the nearest city first.</p>`;
+        return;
+      }
+      state.clientAddr = addr;
+      if (!hasResource) state.destCustom = destCustom.value.trim();
+      state.mapShown = true;
+      renderMap(addr, dest);
+      card.querySelector('#distance-answer').style.display = 'flex';
+    });
+
+    if (state.mapShown && state.clientAddr) {
+      const dest = getDest();
+      renderMap(state.clientAddr, dest);
+    }
+
+    card.appendChild(back());
+  }
+
+
+  else if (state.step === 'oor-distance') {
+    showResult({
+      badge: 'badge-oor',
+      badgeText: 'Process as out of region',
+      title: 'More than 30 minutes away, process them as out of region.',
+      steps: [
+        'This applies even if Platform shows resources near the client.',
+        'Click "Process as Out of Region" on the client profile.',
+        'Mia sends the message below automatically, no need to send it yourself.'
+      ],
+      template: { key: 'outOfRegion', label: 'Sent automatically by Mia' }
+    });
+  }
+
+  else if (state.step === 'nj-check') {
+    card.innerHTML = `
+      <div class="zip-chip red"><span class="dot"></span>Zip flagged</div>
+      <div class="step-label">Step 3 · New Jersey check</div>
+      <p class="question">Is the client's address in New Jersey?</p>
+      <p class="helper-text">All of NJ is covered, so a red zip there is almost always a database gap, not a real distance problem.</p>
+      <div class="options">
+        <button class="opt-btn" data-go="nj-resources-check">Yes, it's in NJ<span class="sub">Skip distance entirely, this is a database issue.</span></button>
+        <button class="opt-btn" data-go="transport">No, not in NJ<span class="sub">Continue checking the usual way.</span></button>
+      </div>
+    `;
+    card.appendChild(back());
+  }
+
+  else if (state.step === 'nj-resources-check') {
+    card.innerHTML = `
+      <div class="zip-chip red"><span class="dot"></span>Zip flagged · New Jersey</div>
+      <div class="step-label">Step 3 · New Jersey check</div>
+      <p class="question">Are there any resources near the client in Platform?</p>
+      <p class="helper-text">Since NJ is fully covered, this isn't about distance, it's about getting the zip added to the database.</p>
+      <div class="options">
+        <button class="opt-btn" data-go="nj-result-with">Yes, resources nearby<span class="sub">Flag it to get the zip added.</span></button>
+        <button class="opt-btn" data-go="nj-result-without">No resources nearby<span class="sub">Flag it anyway, might be a coverage gap.</span></button>
+      </div>
+    `;
+    card.appendChild(back());
+  }
+
+  else if (state.step === 'nj-result-with') {
+    showResult({
+      badge: 'badge-wait',
+      badgeText: 'Flag to Research, don\u2019t process as out of region',
+      title: 'Resources exist nearby, this is a database gap.',
+      steps: [
+        'Post in the Research channel using the message below so the zip gets added to the database.',
+        'You can still share the resources you found with the client at your discretion in the meantime.',
+        'Do not process this client as out of region, they\u2019re in a fully covered state.'
+      ],
+      template: { key: 'njResearchWithResources', label: 'Research channel post' }
+    });
+  }
+
+  else if (state.step === 'nj-result-without') {
+    showResult({
+      badge: 'badge-wait',
+      badgeText: 'Flag to Research, don\u2019t process as out of region',
+      title: 'No resources found nearby, still flag it.',
+      steps: [
+        'Post in the Research channel using the message below to let them know there are no resources near this client, even though they\u2019re in a covered state.',
+        'Do not process this client as out of region, they\u2019re geographically inside a covered state.'
+      ],
+      template: { key: 'njResearchNoResources', label: 'Research channel post' }
+    });
+  }
+
+  else if (state.step === 'transport') {
+    card.innerHTML = `
+      <div class="zip-chip red"><span class="dot"></span>Zip flagged</div>
+      <div class="step-label">Step 4 · Travel time</div>
+      <p class="question">What's the client's mode of transportation?</p>
+      <p class="helper-text">This sets how far counts as "close enough" for both the resource check next and the coverage check after that.</p>
+      <div class="options" id="opt-container"></div>
+    `;
+    const container = card.querySelector('#opt-container');
+    const modes = [
+      { key: 'walking', label: 'Walking', cutoff: '20 min', backstopMiles: 2, sub: 'Counts as close enough within 2 miles.' },
+      { key: 'transit', label: 'Public transit', cutoff: '30 min or 20 mi', backstopMiles: 20, sub: 'Counts as close enough within 20 miles.' },
+      { key: 'driving', label: 'Driving', cutoff: '30 min or 15 mi', backstopMiles: 15, sub: 'Counts as close enough within 15 miles.' },
+      { key: 'unknown', label: 'Not on file / not sure', cutoff: null, backstopMiles: 15, sub: 'No set rule yet, defaulting to 15 miles.' }
+    ];
+    modes.forEach(m => {
+      const btn = document.createElement('button');
+      btn.className = 'opt-btn';
+      btn.innerHTML = `${m.label}`;
+      btn.onclick = () => {
+        state.travelMode = m.label;
+        state.travelCutoff = m.cutoff;
+        state.backstopMiles = m.backstopMiles;
+        goTo('resources');
+      };
+      container.appendChild(btn);
+    });
+    card.appendChild(back());
+  }
+
+  else if (state.step === 'resources') {
+    const backstop = state.backstopMiles || 15;
+    const radiusKm = (backstop * 1.60934).toFixed(1);
+    card.innerHTML = `
+      <div class="zip-chip red"><span class="dot"></span>Zip flagged · ${state.travelMode || 'mode not set'}</div>
+      <div class="step-label">Step 5 · Check resource confidence</div>
+      <p class="question">Are there 3 resources at 70% confidence or higher within ${backstop} miles of the client in Platform?</p>
+      <p class="helper-text">Enter the client's zip and pull live results straight from Platform, no need to search manually first.</p>
+      <div style="margin-bottom:14px;">
+        <input type="text" id="res-zip-input" placeholder="e.g. 08830" maxlength="5" inputmode="numeric"
+          style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit;">
+      </div>
+      <button class="copy-btn" id="check-live-btn" style="margin-bottom:14px; background:var(--citrus-dark);">Check live resources</button>
+      <div id="live-result-holder"></div>
+    `;
+
+    card.querySelector('#check-live-btn').addEventListener('click', async () => {
+      const zipVal = card.querySelector('#res-zip-input').value.trim();
+      const holder = card.querySelector('#live-result-holder');
+      if (!/^\d{5}$/.test(zipVal)) {
+        holder.innerHTML = `<p class="helper-text" style="color:var(--red);">Enter a valid 5-digit zip code.</p>`;
+        return;
+      }
+      holder.innerHTML = `<p class="helper-text">Checking Platform...</p>`;
+
+      const live = await fetchLiveResourceCheck(zipVal, radiusKm);
+
+      if (!live) {
+        state.closestResource = null;
+        holder.innerHTML = `
+          <p class="helper-text" style="color:var(--red); margin-bottom:14px;">Couldn't reach Platform's live data from here. Check manually instead.</p>
+          <div class="options">
+            <button class="opt-btn" data-go="distance">Yes, found 3 that qualify<span class="sub">Checked manually in Platform.</span></button>
+            <button class="opt-btn" data-go="oor-noresources">No, can't get to 3<span class="sub">Checked manually in Platform.</span></button>
+          </div>
+        `;
+        holder.querySelectorAll('.opt-btn[data-go]').forEach(btn => {
+          btn.addEventListener('click', () => goTo(btn.getAttribute('data-go')));
+        });
+        return;
+      }
+
+      const qualifying = live.filter(r => typeof r.confidence === 'number' && r.confidence >= 0.7);
+      // Platform sorts by distance when a location/lat/lng is provided, so the
+      // first qualifying (or, failing that, first overall) result is the closest.
+      const closest = qualifying[0] || live[0] || null;
+      state.closestResource = closest ? {
+        name: closest.name || 'Unnamed resource',
+        address: (typeof closest.latitude === 'number' && typeof closest.longitude === 'number')
+          ? `${closest.latitude},${closest.longitude}`
+          : [closest.addressStreet1, closest.city, closest.state, closest.zipCode].filter(Boolean).join(', ')
+      } : null;
+
+      const listHtml = live.slice(0, 8).map(r => {
+        const pct = typeof r.confidence === 'number' ? Math.round(r.confidence * 100) + '%' : 'unknown';
+        const meets = typeof r.confidence === 'number' && r.confidence >= 0.7;
+        return `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">
+          <span>${r.name || 'Unnamed resource'}</span>
+          <span style="color:${meets ? 'var(--green-soft)' : 'var(--ink-soft)'}; font-weight:600;">${pct}</span>
+        </div>`;
+      }).join('');
+
+      holder.innerHTML = `
+        <div class="note" style="margin-bottom:12px;">Found ${live.length} resource${live.length === 1 ? '' : 's'} within ${backstop} mi. <strong>${qualifying.length} at 70%+ confidence.</strong></div>
+        <div style="margin-bottom:14px;">${listHtml || '<p class="helper-text">No resources found nearby.</p>'}</div>
+        <div class="options">
+          <button class="opt-btn" data-go="distance">${qualifying.length >= 3 ? 'Continue \u2014 3+ qualify' : 'Continue anyway (manually found 3+)'}</button>
+          <button class="opt-btn" data-go="oor-noresources">${qualifying.length < 3 ? 'Process as out of region \u2014 fewer than 3 qualify' : 'Process as out of region anyway'}</button>
+        </div>
+      `;
+      holder.querySelectorAll('.opt-btn[data-go]').forEach(btn => {
+        btn.addEventListener('click', () => goTo(btn.getAttribute('data-go')));
+      });
+    });
+
+    card.appendChild(back());
+  }
+
+  else if (state.step === 'onboard-caveat') {
+    showResult({
+      badge: 'badge-wait',
+      badgeText: 'Send a heads-up, then onboard if they confirm',
+      title: "You've got resources that qualify, but give the client a heads-up first.",
+      steps: [
+        'Send the "Unreliable / Just Outside Coverage Area" message below.',
+        'You can clear the flag at this point, no need to wait on their reply.',
+        'If the client still wants what you found, onboard them using the grey paper airplane (send) button.'
+      ],
+      template: { key: 'unreliable', label: 'Unreliable / Just Outside Coverage Area' }
+    });
+  }
+
+  else if (state.step === 'oor-noresources') {
+    showResult({
+      badge: 'badge-oor',
+      badgeText: 'Process as out of region',
+      title: "Couldn't find 3 qualifying resources, process as out of region.",
+      steps: [
+        'Without 3 resources that are both close enough for their transportation and 70%+ confidence, there\u2019s nothing worth checking distance for.',
+        'Click "Process as Out of Region" on the client profile.',
+        'Mia sends the message below automatically.'
+      ],
+      template: { key: 'outOfRegion', label: 'Sent automatically by Mia' }
+    });
+  }
+
+  // Attach click handlers for simple data-go buttons
+  card.querySelectorAll('.opt-btn[data-go]').forEach(btn => {
+    btn.addEventListener('click', () => goTo(btn.getAttribute('data-go')));
+  });
+}
+
+function showTemplateResult(templateKey, label) {
+  state.history.push(state.step);
+  state.step = 'address-result-' + templateKey;
+  const card = document.getElementById('card');
+  card.innerHTML = `
+    <div class="result-badge badge-wait">Send this, then wait for a reply</div>
+    <p class="result-title">Ask for what's missing before going further.</p>
+    <div class="note">Once the client replies with the missing info, come back and continue from Step 1.</div>
+    <div class="template-block">
+      <div class="template-label">${label}</div>
+      <div class="template-text" id="tpl-text">${templates[templateKey]}</div>
+      <button class="copy-btn" id="copy-btn">Copy message</button>
+    </div>
+  `;
+  card.querySelector('#copy-btn').addEventListener('click', (e) => copyText(e.target, templates[templateKey]));
+  card.appendChild((function(){
+    const b = document.createElement('button');
+    b.className = 'back-btn';
+    b.textContent = '← Back';
+    b.onclick = goBack;
+    return b;
+  })());
+  renderRail('address');
+}
+
+function showResult({ badge, badgeText, title, steps, template }) {
+  const card = document.getElementById('card');
+  card.innerHTML = `
+    <div class="result-badge ${badge}">${badgeText}</div>
+    <p class="result-title">${title}</p>
+    <ul class="result-steps">${steps.map(s => `<li>${s}</li>`).join('')}</ul>
+    ${template ? `
+    <div class="template-block">
+      <div class="template-label">${template.label}</div>
+      <div class="template-text">${templates[template.key]}</div>
+      <button class="copy-btn" id="copy-btn">Copy message</button>
+    </div>` : ''}
+  `;
+  if (template) {
+    card.querySelector('#copy-btn').addEventListener('click', (e) => copyText(e.target, templates[template.key]));
+  }
+  card.appendChild((function(){
+    const b = document.createElement('button');
+    b.className = 'back-btn';
+    b.textContent = '← Back';
+    b.onclick = goBack;
+    return b;
+  })());
+  const restart = document.createElement('button');
+  restart.className = 'restart-btn';
+  restart.textContent = 'Start over with a new client';
+  restart.style.marginTop = '14px';
+  restart.style.display = 'block';
+  restart.onclick = () => { state.history = []; state.step = 'address'; state.travelMode = null; state.travelCutoff = null; state.backstopMiles = null; state.clientAddr = null; state.destCity = null; state.destCustom = null; state.mapShown = false; state.closestResource = null; render(); };
+  card.appendChild(restart);
+  renderRail('result');
+}
+
+render();
+</script>
+
+</body>
+</html>
