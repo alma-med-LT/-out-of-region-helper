@@ -314,7 +314,7 @@ const state = {
   history: []
 };
 
-const railSteps = ['address', 'zip', 'checks', 'transport', 'resources', 'distance', 'result'];
+const railSteps = ['address', 'zip', 'checks', 'distance', 'transport', 'resources', 'result'];
 
 function renderRail(current) {
   const rail = document.getElementById('rail');
@@ -564,8 +564,8 @@ function render() {
     if (!state.destCity) state.destCity = 'Atlanta, GA';
     const questionText = `Is the client's address more than 30 km (about 18.6 miles) from our nearest region?`;
     card.innerHTML = `
-      <div class="zip-chip red"><span class="dot"></span>Zip flagged · ${state.travelMode || 'mode not set'}</div>
-      <div class="step-label">Step 6 · Check the distance</div>
+      <div class="zip-chip red"><span class="dot"></span>Zip flagged</div>
+      <div class="step-label">Step 4 · Check the distance</div>
       <p class="question">${questionText}</p>
       <p class="helper-text">Enter the client's address, pick the closest covered city, and the tool calculates the distance automatically, no traffic factored in.</p>
 
@@ -669,7 +669,7 @@ function render() {
         </div>
       `;
       setTimeout(() => {
-        goTo(withinRange ? 'onboard-caveat' : 'oor-distance');
+        goTo(withinRange ? 'transport' : 'oor-distance');
       }, 1100);
     });
 
@@ -699,7 +699,7 @@ function render() {
       <p class="helper-text">All of NJ is covered, so a red zip there is almost always a database gap, not a real distance problem.</p>
       <div class="options">
         <button class="opt-btn" data-go="nj-resources-check">Yes, it's in NJ<span class="sub">Skip distance entirely, this is a database issue.</span></button>
-        <button class="opt-btn" data-go="transport">No, not in NJ<span class="sub">Continue checking the usual way.</span></button>
+        <button class="opt-btn" data-go="distance">No, not in NJ<span class="sub">Continue checking the usual way.</span></button>
       </div>
     `;
     card.appendChild(back());
@@ -749,9 +749,9 @@ function render() {
   else if (state.step === 'transport') {
     card.innerHTML = `
       <div class="zip-chip red"><span class="dot"></span>Zip flagged</div>
-      <div class="step-label">Step 4 · Travel time</div>
+      <div class="step-label">Step 5 · Travel time</div>
       <p class="question">What's the client's mode of transportation?</p>
-      <p class="helper-text">This sets how far counts as "close enough" for both the resource check next and the coverage check after that.</p>
+      <p class="helper-text">This sets how far counts as "close enough" for the resource check next.</p>
       <div class="options" id="opt-container"></div>
     `;
     const container = card.querySelector('#opt-container');
@@ -780,11 +780,11 @@ function render() {
     const backstop = state.backstopMiles || 15;
     card.innerHTML = `
       <div class="zip-chip red"><span class="dot"></span>Zip flagged · ${state.travelMode || 'mode not set'}</div>
-      <div class="step-label">Step 5 · Check resource confidence</div>
+      <div class="step-label">Step 6 · Check resource confidence</div>
       <p class="question">Are there 3 resources at 70% confidence or higher within ${backstop} miles of the client in Platform?</p>
       <p class="helper-text">Check manually in Platform for now — the live check is temporarily disabled while we sort out an issue with Platform's resource search not actually filtering by distance.</p>
       <div class="options">
-        <button class="opt-btn" data-go="distance">Yes, found 3 that qualify</button>
+        <button class="opt-btn" data-go="onboard-caveat">Yes, found 3 that qualify</button>
         <button class="opt-btn" data-go="oor-noresources">No, can't get to 3</button>
       </div>
     `;
@@ -811,7 +811,7 @@ function render() {
       badgeText: 'Process as out of region',
       title: "Couldn't find 3 qualifying resources, process as out of region.",
       steps: [
-        'Without 3 resources that are both close enough for their transportation and 70%+ confidence, there\u2019s nothing worth checking distance for.',
+        'Distance was within range, but without 3 resources that are both close enough for their transportation and 70%+ confidence, this doesn\u2019t qualify to onboard.',
         'Click "Process as Out of Region" on the client profile.',
         'Mia sends the message below automatically.'
       ],
