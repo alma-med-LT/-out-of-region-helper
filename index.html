@@ -562,7 +562,7 @@ function render() {
 
   else if (state.step === 'distance') {
     if (!state.destCity) state.destCity = 'Atlanta, GA';
-    const questionText = `Is the client's address more than 30 km (about 18.6 miles) from our nearest region?`;
+    const questionText = `Is the client's address more than 50 miles from our nearest region?`;
     card.innerHTML = `
       <div class="zip-chip red"><span class="dot"></span>Zip flagged</div>
       <div class="step-label">Step 4 · Check the distance</div>
@@ -660,9 +660,9 @@ function render() {
       }
 
       state.calculatedMiles = miles;
-      const withinRange = miles <= 18.6;
+      const withinRange = miles <= 50;
       card.querySelector('#map-holder').innerHTML = `
-        <p class="question" style="font-size:16px; margin-bottom:8px;">Is the client's address more than 30 km (about 18.6 miles) from our nearest region?</p>
+        <p class="question" style="font-size:16px; margin-bottom:8px;">Is the client's address more than 50 miles from our nearest region?</p>
         <div class="note" style="margin-bottom:14px;">
           <strong>${miles} miles</strong> (straight-line distance, no traffic involved).
           ${withinRange ? 'That\u2019s within range, moving on...' : 'That\u2019s over the range, moving on...'}
@@ -681,7 +681,7 @@ function render() {
     showResult({
       badge: 'badge-oor',
       badgeText: 'Process as out of region',
-      title: 'More than 30 minutes away, process them as out of region.',
+      title: 'More than 50 miles away, process them as out of region.',
       steps: [
         'This applies even if Platform shows resources near the client.',
         'Click "Process as Out of Region" on the client profile.',
