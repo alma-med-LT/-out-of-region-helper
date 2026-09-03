@@ -408,6 +408,17 @@ const HUB_REFERENCE_ZIPS = {
   'Atlanta, GA': 30301, 'Tampa, FL': 33601, 'Columbus, OH': 43201, 'Detroit, MI': 48201
 };
 
+// Close-in DC suburbs whose state would otherwise route them to the wrong hub
+// (e.g. Montgomery/PG County, MD gets mapped to Baltimore by state alone, even
+// though DC is much closer). Listed by zip3 (first 3 digits of the zip code).
+// DC proper: 200-205. Montgomery & Prince George's County, MD: 207-209.
+// Arlington, Alexandria, Fairfax, VA: 220-223.
+const DMV_ZIP3 = new Set([200, 201, 202, 203, 204, 205, 207, 208, 209, 220, 221, 222, 223]);
+
+function isDmvZip(zip) {
+  return DMV_ZIP3.has(Math.floor(zip / 100));
+}
+
 async function geocodeAddress(address) {
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`);
@@ -447,6 +458,12 @@ function suggestHubCities(address) {
   if (!zipMatch) return primary ? [primary] : [];
 
   const clientZip = parseInt(zipMatch[1], 10);
+
+  // Close-in DC suburb, regardless of what the state alone would suggest.
+  if (isDmvZip(clientZip) && primary !== 'Washington, DC') {
+    return primary ? ['Washington, DC', primary] : ['Washington, DC'];
+  }
+
   const ranked = Object.entries(HUB_REFERENCE_ZIPS)
     .map(([city, zip]) => ({ city, diff: Math.abs(zip - clientZip) }))
     .sort((a, b) => a.diff - b.diff);
