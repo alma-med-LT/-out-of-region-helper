@@ -595,7 +595,7 @@ function render() {
       <div style="margin-bottom:14px;">
         <label style="font-size:13px; font-weight:600; color:var(--ink-soft); display:block; margin-bottom:4px;">Closest covered city</label>
         <select id="dest-city" style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit; background:var(--paper);">
-          ${[['Atlanta, GA','Atlanta, GA'],['Baltimore, MD','Baltimore, MD'],['Boston, MA','Boston, MA'],['Charlotte, NC','Charlotte, NC'],['Columbus, OH','Columbus, OH'],['Detroit, MI','Detroit, MI'],['Tampa, FL','Tampa, FL'],['Washington, DC','Washington, DC (or nearby VA)'],['New York, NY','New York, NY'],['Philadelphia, PA','Philadelphia, PA']]
+          ${[['Atlanta, GA','Atlanta, GA'],['Baltimore, MD','Baltimore, MD'],['Boston, MA','Boston, MA'],['Charlotte, NC','Charlotte, NC'],['Columbus, OH','Columbus, OH'],['Detroit, MI','Detroit, MI'],['Tampa, FL','Tampa, FL'],['Washington, DC','Washington, DC (or nearby VA/MD)'],['New York, NY','New York, NY'],['Philadelphia, PA','Philadelphia, PA']]
             .map(([val, label]) => `<option value="${val}" ${state.destCity === val ? 'selected' : ''}>${label}</option>`).join('')}
           <option value="custom" ${state.destCity === 'custom' ? 'selected' : ''}>All of NJ — type nearest NJ city</option>
         </select>
