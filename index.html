@@ -8,6 +8,8 @@
 <script>
   window.amplitude && window.amplitude.init('f0422af848dd8563de4134a8c4576d13', { autocapture: { pageViews: true, sessions: true } });
 </script>
+<!-- TODO: swap in the real, domain-restricted Google Maps API key before this goes live -->
+<script src="https://maps.googleapis.com/maps/api/js?key=GOOGLE_MAPS_API_KEY_HERE&loading=async" async defer></script>
 <style>
   :root {
     --cream: #FAF6EC;
@@ -419,34 +421,41 @@ function isDmvZip(zip) {
   return DMV_ZIP3.has(Math.floor(zip / 100));
 }
 
-async function geocodeAddress(address) {
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data || !data[0]) return null;
-    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
-  } catch (e) {
-    return null;
-  }
-}
-
-function haversineMiles(loc1, loc2) {
-  const toRad = d => d * Math.PI / 180;
-  const R = 3958.8; // Earth radius in miles
-  const dLat = toRad(loc2.lat - loc1.lat);
-  const dLon = toRad(loc2.lon - loc1.lon);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(loc1.lat)) * Math.cos(toRad(loc2.lat)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-async function checkDistanceMiles(addressA, addressB) {
-  // Geocode both points and measure straight-line distance directly. No routing
-  // engine involved at all, so there's no live traffic (or any traffic model)
-  // in this number, and one less external service that can fail.
-  const [locA, locB] = await Promise.all([geocodeAddress(addressA), geocodeAddress(addressB)]);
-  if (!locA || !locB) return null;
-  return +(haversineMiles(locA, locB)).toFixed(1);
+function getDrivingRoute(addressA, addressB) {
+  // Uses Google's DirectionsService (loaded via the Maps JavaScript API script
+  // tag) instead of Nominatim geocoding + straight-line haversine. This gives
+  // real driving distance and duration, not "as the crow flies," and the same
+  // result object can be handed straight to a DirectionsRenderer to draw the
+  // route on an actual map. No departure_time is set, so this does not factor
+  // in live traffic, only the DirectionsService.route call and Google's typical
+  // road-network distance.
+  return new Promise((resolve) => {
+    if (typeof google === 'undefined' || !google.maps || !google.maps.DirectionsService) {
+      resolve(null);
+      return;
+    }
+    try {
+      const directionsService = new google.maps.DirectionsService();
+      directionsService.route({
+        origin: addressA,
+        destination: addressB,
+        travelMode: google.maps.TravelMode.DRIVING,
+      }, (result, status) => {
+        if (status !== 'OK' || !result.routes[0] || !result.routes[0].legs[0]) {
+          resolve(null);
+          return;
+        }
+        const leg = result.routes[0].legs[0];
+        resolve({
+          miles: +(leg.distance.value / 1609.34).toFixed(1),
+          durationText: leg.duration.text,
+          directionsResult: result,
+        });
+      });
+    } catch (e) {
+      resolve(null);
+    }
+  });
 }
 
 function suggestHubCities(address) {
@@ -604,7 +613,7 @@ function render() {
         <p id="dest-suggestion" style="font-size:12.5px; color:var(--green-soft); margin:6px 0 0; display:none;"></p>
       </div>
 
-      <button class="copy-btn" id="show-route-btn" style="margin-bottom:14px; background:var(--citrus-dark);">Check distance (no traffic)</button>
+      <button class="copy-btn" id="show-route-btn" style="margin-bottom:14px; background:var(--citrus-dark);">Check driving distance</button>
 
       <div id="map-holder"></div>
     `;
@@ -666,25 +675,35 @@ function render() {
       state.destCustom = destCustom.value.trim();
       state.mapShown = true;
 
-      card.querySelector('#map-holder').innerHTML = `<p class="helper-text">Calculating distance...</p>`;
-      const miles = await checkDistanceMiles(addr, dest);
+      const mapHolder = card.querySelector('#map-holder');
+      mapHolder.innerHTML = `<p class="helper-text">Calculating driving distance...</p>`;
+      const route = await getDrivingRoute(addr, dest);
 
-      if (miles === null) {
-        card.querySelector('#map-holder').innerHTML = `
-          <p class="helper-text" style="color:var(--red); margin-bottom:10px;">Couldn't find one of these addresses automatically. Double check the spelling, or try a nearby cross street, then click the button again.</p>
+      if (!route) {
+        mapHolder.innerHTML = `
+          <p class="helper-text" style="color:var(--red); margin-bottom:10px;">Couldn't find a driving route between these addresses automatically. Double check the spelling, or try a nearby cross street, then click the button again.</p>
         `;
         return;
       }
 
+      const miles = route.miles;
       state.calculatedMiles = miles;
       const withinRange = miles <= 50;
-      card.querySelector('#map-holder').innerHTML = `
+      mapHolder.innerHTML = `
         <p class="question" style="font-size:16px; margin-bottom:8px;">Is the client's address more than 50 miles from our nearest region?</p>
         <div class="note" style="margin-bottom:14px;">
-          <strong>${miles} miles</strong> (straight-line distance, no traffic involved).
+          <strong>${miles} miles</strong> driving distance (about ${route.durationText}).
           ${withinRange ? 'That\u2019s within range, moving on...' : 'That\u2019s over the range, moving on...'}
         </div>
+        <div id="gmap-canvas" style="width:100%; height:220px; border-radius:8px; overflow:hidden; border:1.5px solid var(--border);"></div>
       `;
+
+      const gmapCanvas = mapHolder.querySelector('#gmap-canvas');
+      if (gmapCanvas && typeof google !== 'undefined' && google.maps) {
+        const map = new google.maps.Map(gmapCanvas, { disableDefaultUI: true, zoomControl: true });
+        new google.maps.DirectionsRenderer({ map, directions: route.directionsResult, suppressMarkers: false });
+      }
+
       setTimeout(() => {
         goTo(withinRange ? 'transport' : 'oor-distance');
       }, 1100);
