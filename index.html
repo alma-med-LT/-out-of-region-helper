@@ -838,15 +838,15 @@ function render() {
       state.destCity = closest.point.name;
       const withinRange = miles <= 50;
       const placeLabel = r => (r.area === 'New Jersey' ? `New Jersey (${r.point.name})` : r.area);
-      // Only list other cities that are also within range, to keep the result short.
-      const alsoChecked = others.filter(r => r.drive.miles <= 50);
+      const missing = shortlist.filter(s => !ranked.some(r => r.area === s.area));
       mapHolder.innerHTML = `
         <p class="question" style="font-size:16px; margin-bottom:8px;">Is the client's address more than 50 miles from our nearest region?</p>
         <div class="note" style="margin-bottom:14px;">
           Closest: <strong>${placeLabel(closest)}, ${miles} miles</strong> driving (about ${closest.drive.durationText}).
           ${withinRange ? 'That’s within range.' : 'That’s over the range.'}
           ${runnerUp ? `<br>Runner-up: ${placeLabel(runnerUp)}, ${runnerUp.drive.miles} miles.` : ''}
-          ${alsoChecked.length ? `<br><span style="font-size:13px;">Also checked: ${alsoChecked.map(r => `${placeLabel(r)}, ${r.drive.miles} miles`).join(' · ')}</span>` : ''}
+          ${others.length || missing.length ? `<br><span style="font-size:13px;">Also checked: ${others.map(r => `${placeLabel(r)}, ${r.drive.miles} miles`)
+            .concat(missing.map(m => `${m.area}, no route found`)).join(' · ')}</span>` : ''}
         </div>
         <a href="${googleMapsLink(addr, closest.point)}" target="_blank" rel="noopener" style="display:block; margin-bottom:14px; font-size:14px; font-weight:600; color:var(--green-soft);">Open in Google Maps ↗</a>
         <button class="copy-btn" id="continue-after-distance-btn">Continue</button>
