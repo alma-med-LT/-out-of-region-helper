@@ -396,37 +396,14 @@ const US_STATES = {
   WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming'
 };
 
-// Clients can cross state lines, as long as they live in a state we serve.
-// NJ is fully covered and handled separately (no distance check).
-const SERVED_STATES = new Set(['GA', 'MA', 'NC', 'OH', 'MI', 'FL', 'NY', 'PA', 'NJ', 'DC', 'MD', 'VA']);
-
-// Covered areas and fixed points to measure to (downtown / city hall).
-// NJ counts as one area with several points, including spots near its borders,
-// so clients just across the line in PA or NY are measured to the closest part of NJ.
-const COVERED_AREAS = [
-  { area: 'Atlanta, GA', points: [{ name: 'Atlanta, GA', lat: 33.7490, lng: -84.3880 }] },
-  { area: 'Baltimore, MD', points: [{ name: 'Baltimore, MD', lat: 39.2904, lng: -76.6122 }] },
-  { area: 'Boston, MA', points: [{ name: 'Boston, MA', lat: 42.3601, lng: -71.0589 }] },
-  { area: 'Charlotte, NC', points: [{ name: 'Charlotte, NC', lat: 35.2271, lng: -80.8431 }] },
-  { area: 'Columbus, OH', points: [{ name: 'Columbus, OH', lat: 39.9612, lng: -82.9988 }] },
-  { area: 'Detroit, MI', points: [{ name: 'Detroit, MI', lat: 42.3314, lng: -83.0458 }] },
-  { area: 'Tampa, FL', points: [{ name: 'Tampa, FL', lat: 27.9506, lng: -82.4572 }] },
-  { area: 'Washington, DC', points: [{ name: 'Washington, DC', lat: 38.9072, lng: -77.0369 }] },
-  { area: 'New York City', points: [{ name: 'New York City', lat: 40.7128, lng: -74.0060 }] },
-  { area: 'Philadelphia, PA', points: [{ name: 'Philadelphia, PA', lat: 39.9526, lng: -75.1652 }] },
-  { area: 'New Jersey', points: [
-    { name: 'Newark, NJ', lat: 40.7357, lng: -74.1724 },
-    { name: 'Trenton, NJ', lat: 40.2206, lng: -74.7597 },
-    { name: 'Camden, NJ', lat: 39.9259, lng: -75.1196 },
-    { name: 'Atlantic City, NJ', lat: 39.3643, lng: -74.4229 },
-    { name: 'Phillipsburg, NJ', lat: 40.6937, lng: -75.1902 },
-    { name: 'Mahwah, NJ', lat: 41.0887, lng: -74.1438 },
-    { name: 'Cape May, NJ', lat: 38.9351, lng: -74.9060 }
-  ] }
-];
-
-const SHORTLIST_SIZE = 3;
-const METERS_PER_MILE = 1609.34;
+// Crossing state lines makes a client out of region, except in the DMV. Each
+// covered state lists the city (or cities) we measure driving distance to.
+// NJ is fully covered and handled separately, so it's not listed here.
+const STATE_TO_HUBS = {
+  DC: ['Washington, DC'], VA: ['Washington, DC'], MD: ['Washington, DC', 'Baltimore, MD'],
+  GA: ['Atlanta, GA'], MA: ['Boston, MA'], NC: ['Charlotte, NC'], OH: ['Columbus, OH'],
+  MI: ['Detroit, MI'], FL: ['Tampa, FL'], NY: ['New York, NY'], PA: ['Philadelphia, PA']
+};
 
 // Full state names, longest first, so "West Virginia" wins over "Virginia".
 const STATE_NAMES = Object.entries(US_STATES)
@@ -468,97 +445,28 @@ function stateFromAddress(address) {
 function regionRuleForState(code) {
   if (!code) return { kind: 'unknown' };
   if (code === 'NJ') return { kind: 'nj' };
-  if (!SERVED_STATES.has(code)) return { kind: 'not-covered' };
-  return { kind: 'distance' };
+  if (!STATE_TO_HUBS[code]) return { kind: 'not-covered' };
+  return { kind: 'distance', hubs: STATE_TO_HUBS[code] };
 }
 
-// Straight-line miles between two { lat, lng } points (haversine).
-function straightLineMiles(a, b) {
-  const toRad = d => d * Math.PI / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 3958.8 * 2 * Math.asin(Math.sqrt(h));
-}
-
-// The closest point in each covered area, then the few closest areas overall.
-// No Google call: this only decides which places get a real driving check.
-function shortlistAreas(client) {
-  return COVERED_AREAS
-    .map(({ area, points }) => {
-      const best = points
-        .map(p => ({ point: p, miles: straightLineMiles(client, p) }))
-        .reduce((a, b) => (b.miles < a.miles ? b : a));
-      return { area, point: best.point, straightMiles: best.miles };
-    })
-    .sort((a, b) => a.straightMiles - b.straightMiles)
-    .slice(0, SHORTLIST_SIZE);
-}
-
-// Request 1: turn the typed address into coordinates.
-function geocodeAddress(address) {
-  return new Promise((resolve) => {
-    if (typeof google === 'undefined' || !google.maps || !google.maps.Geocoder) {
-      resolve(null);
-      return;
-    }
-    try {
-      new google.maps.Geocoder().geocode({ address }, (results, status) => {
-        if (status !== 'OK' || !results || !results[0]) {
-          resolve(null);
-          return;
-        }
-        const loc = results[0].geometry.location;
-        resolve({ lat: loc.lat(), lng: loc.lng() });
-      });
-    } catch (e) {
-      resolve(null);
-    }
-  });
-}
-
-function formatDuration(totalMinutes) {
-  const mins = Math.round(totalMinutes);
-  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'}`;
-  const hours = Math.floor(mins / 60);
-  const rest = mins % 60;
-  return `${hours} hr${hours === 1 ? '' : 's'}${rest ? ` ${rest} min${rest === 1 ? '' : 's'}` : ''}`;
-}
-
-// Request 2: driving distance from the client to every shortlisted point, in
-// one Routes API route matrix request. No departure time, so no live traffic.
-// Returns one { miles, durationText } (or null) per destination, in order.
-async function getDrivingDistancesMatrix(origin, destinations) {
-  const { RouteMatrix } = await google.maps.importLibrary('routes');
-  const { matrix } = await RouteMatrix.computeRouteMatrix({
-    origins: [origin],
-    destinations: destinations.map(d => ({ lat: d.lat, lng: d.lng })),
-    travelMode: 'DRIVING',
-    fields: ['distanceMeters', 'durationMillis', 'condition'],
-  });
-  const items = matrix.rows[0].items;
-  return destinations.map((_, i) => {
-    const item = items[i];
-    if (!item || item.error || item.condition !== 'ROUTE_EXISTS' || item.distanceMeters == null) return null;
-    return {
-      miles: +(item.distanceMeters / METERS_PER_MILE).toFixed(1),
-      durationText: formatDuration(item.durationMillis / 60000),
-    };
-  });
-}
-
-// Fallback if the route matrix request fails: one Directions request per
-// shortlisted point, all at the same time.
-function getDrivingRoute(origin, destination) {
+function getDrivingRoute(addressA, addressB) {
+  // Uses Google's DirectionsService (loaded via the Maps JavaScript API script
+  // tag) instead of Nominatim geocoding + straight-line haversine. This gives
+  // real driving distance and duration, not "as the crow flies," and the same
+  // result object can be handed straight to a DirectionsRenderer to draw the
+  // route on an actual map. No departure_time is set, so this does not factor
+  // in live traffic, only the DirectionsService.route call and Google's typical
+  // road-network distance.
   return new Promise((resolve) => {
     if (typeof google === 'undefined' || !google.maps || !google.maps.DirectionsService) {
       resolve(null);
       return;
     }
     try {
-      new google.maps.DirectionsService().route({
-        origin,
-        destination,
+      const directionsService = new google.maps.DirectionsService();
+      directionsService.route({
+        origin: addressA,
+        destination: addressB,
         travelMode: google.maps.TravelMode.DRIVING,
       }, (result, status) => {
         if (status !== 'OK' || !result.routes[0] || !result.routes[0].legs[0]) {
@@ -567,26 +475,15 @@ function getDrivingRoute(origin, destination) {
         }
         const leg = result.routes[0].legs[0];
         resolve({
-          miles: +(leg.distance.value / METERS_PER_MILE).toFixed(1),
+          miles: +(leg.distance.value / 1609.34).toFixed(1),
           durationText: leg.duration.text,
+          directionsResult: result,
         });
       });
     } catch (e) {
       resolve(null);
     }
   });
-}
-
-async function getDrivingDistances(origin, destinations) {
-  try {
-    const results = await getDrivingDistancesMatrix(origin, destinations);
-    if (results.some(Boolean)) return results;
-  } catch (e) { /* fall back to Directions below */ }
-  return Promise.all(destinations.map(d => getDrivingRoute(origin, { lat: d.lat, lng: d.lng })));
-}
-
-function googleMapsLink(fromAddress, point) {
-  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fromAddress)}&destination=${point.lat},${point.lng}&travelmode=driving`;
 }
 
 function trackEvent(name, props) {
@@ -691,7 +588,7 @@ function render() {
       <div class="zip-chip red"><span class="dot"></span>Zip flagged</div>
       <div class="step-label">Step 4 · Check the distance</div>
       <p class="question">${questionText}</p>
-      <p class="helper-text">Clients can cross state lines, as long as they live in a state we serve. Enter the address and the tool finds the closest covered city in any of our states, then checks the driving distance. Over 50 miles is out of region.</p>
+      <p class="helper-text">Enter the client's address. Crossing state lines makes a client out of region, except in the DMV, so the tool reads the state and checks driving distance only to that state's covered city, no traffic factored in.</p>
 
       <div style="margin-bottom:10px;">
         <label style="font-size:13px; font-weight:600; color:var(--ink-soft); display:block; margin-bottom:4px;">Client's address</label>
@@ -742,8 +639,10 @@ function render() {
         showStatus('All of New Jersey is covered, so there’s no distance check. Continue to the New Jersey steps.', 'var(--green-soft)');
       } else if (rule.kind === 'not-covered') {
         showStatus(`${US_STATES[state.clientState]} isn’t a state we cover, so this client is out of region. No distance check needed.`, 'var(--red)');
+      } else if (rule.hubs.length > 1) {
+        showStatus(`DMV area: checks driving distance to both ${rule.hubs.join(' and ')}, and uses the closer one.`, 'var(--green-soft)');
       } else {
-        showStatus(`${US_STATES[state.clientState]} is a state we serve. The tool will check the closest covered cities, in any of our states.`, 'var(--green-soft)');
+        showStatus(`Checks driving distance to ${rule.hubs[0]}.`, 'var(--green-soft)');
       }
     };
 
@@ -808,49 +707,48 @@ function render() {
       state.clientAddr = addr;
       state.mapShown = true;
 
-      mapHolder.innerHTML = `<p class="helper-text">Finding the closest covered cities...</p>`;
-      const client = await geocodeAddress(addr);
-      if (!client) {
-        mapHolder.innerHTML = `
-          <p class="helper-text" style="color:var(--red); margin-bottom:10px;">Couldn't find this address on the map. Double check the spelling, or try a nearby cross street, then click the button again.</p>
-        `;
-        return;
-      }
-
-      const shortlist = shortlistAreas(client);
       mapHolder.innerHTML = `<p class="helper-text">Calculating driving distance...</p>`;
-      const drives = await getDrivingDistances(client, shortlist.map(s => s.point));
-      const ranked = shortlist
-        .map((s, i) => ({ ...s, drive: drives[i] }))
-        .filter(r => r.drive)
-        .sort((a, b) => a.drive.miles - b.drive.miles);
+      // One route per covered city for the state. Only MD has two, run at the same time.
+      const routes = await Promise.all(rule.hubs.map(hub => getDrivingRoute(addr, hub)));
+      const found = rule.hubs
+        .map((hub, i) => ({ hub, route: routes[i] }))
+        .filter(r => r.route);
 
-      if (ranked.length === 0) {
+      if (found.length === 0) {
         mapHolder.innerHTML = `
-          <p class="helper-text" style="color:var(--red); margin-bottom:10px;">Couldn't find a driving route from this address automatically. Double check the spelling, or try a nearby cross street, then click the button again.</p>
+          <p class="helper-text" style="color:var(--red); margin-bottom:10px;">Couldn't find a driving route between these addresses automatically. Double check the spelling, or try a nearby cross street, then click the button again.</p>
         `;
         return;
       }
 
-      const [closest, runnerUp, ...others] = ranked;
-      const miles = closest.drive.miles;
+      const closest = found.reduce((a, b) => (b.route.miles < a.route.miles ? b : a));
+      const route = closest.route;
+      const miles = route.miles;
       state.calculatedMiles = miles;
-      state.destCity = closest.point.name;
+      state.destCity = closest.hub;
       const withinRange = miles <= 50;
-      const placeLabel = r => (r.area === 'New Jersey' ? `New Jersey (${r.point.name})` : r.area);
-      // Only list other cities that are also within range, to keep the result short.
-      const alsoChecked = others.filter(r => r.drive.miles <= 50);
+      const comparison = rule.hubs.length > 1
+        ? `<br><span style="font-size:13px;">${rule.hubs.map(hub => {
+            const r = found.find(f => f.hub === hub);
+            return r ? `${hub}: ${r.route.miles} miles` : `${hub}: no route found`;
+          }).join(' · ')}</span>`
+        : '';
       mapHolder.innerHTML = `
         <p class="question" style="font-size:16px; margin-bottom:8px;">Is the client's address more than 50 miles from our nearest region?</p>
         <div class="note" style="margin-bottom:14px;">
-          Closest: <strong>${placeLabel(closest)}, ${miles} miles</strong> driving (about ${closest.drive.durationText}).
+          <strong>${miles} miles</strong> driving distance to ${closest.hub} (about ${route.durationText}).
           ${withinRange ? 'That’s within range.' : 'That’s over the range.'}
-          ${runnerUp ? `<br>Runner-up: ${placeLabel(runnerUp)}, ${runnerUp.drive.miles} miles.` : ''}
-          ${alsoChecked.length ? `<br><span style="font-size:13px;">Also checked: ${alsoChecked.map(r => `${placeLabel(r)}, ${r.drive.miles} miles`).join(' · ')}</span>` : ''}
+          ${comparison}
         </div>
-        <a href="${googleMapsLink(addr, closest.point)}" target="_blank" rel="noopener" style="display:block; margin-bottom:14px; font-size:14px; font-weight:600; color:var(--green-soft);">Open in Google Maps ↗</a>
+        <div id="gmap-canvas" style="width:100%; height:220px; border-radius:8px; overflow:hidden; border:1.5px solid var(--border); margin-bottom:14px;"></div>
         <button class="copy-btn" id="continue-after-distance-btn">Continue</button>
       `;
+
+      const gmapCanvas = mapHolder.querySelector('#gmap-canvas');
+      if (gmapCanvas && typeof google !== 'undefined' && google.maps) {
+        const map = new google.maps.Map(gmapCanvas, { disableDefaultUI: true, zoomControl: true });
+        new google.maps.DirectionsRenderer({ map, directions: route.directionsResult, suppressMarkers: false });
+      }
 
       mapHolder.querySelector('#continue-after-distance-btn').addEventListener('click', () => {
         goTo(withinRange ? 'transport' : 'oor-distance');
@@ -866,7 +764,7 @@ function render() {
       badgeText: 'Process as out of region',
       title: `${US_STATES[state.clientState] || 'This state'} isn’t a state we cover, process them as out of region.`,
       steps: [
-        'Clients can cross state lines to a covered city, but only if they live in a state we serve: Georgia, Massachusetts, North Carolina, Ohio, Michigan, Florida, New York, Pennsylvania, New Jersey, DC, Maryland, or Virginia.',
+        'Crossing state lines makes a client out of region. The only exception is the DMV area (DC, Maryland, and Virginia).',
         'This applies even if Platform shows resources near the client.',
         'Click "Process as Out of Region" on the client profile.',
         'Mia sends the message below automatically, no need to send it yourself.'
