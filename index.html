@@ -356,7 +356,8 @@ function restart() {
   state.backstopMiles = null; state.calculatedMiles = null; 
   state.clientAddr = null;
   state.destCity = null;
-  state.destCustom = null;
+  state.clientState = null;
+  state.clientStateSource = null;
   state.mapShown = false;
   render();
 }
@@ -381,44 +382,71 @@ const templates = {
   njResearchNoResources: `Client Platform Link: [paste link]\nZip Code(s): [zip]\nSituation: Client is in New Jersey (fully covered), zip is showing red/out of region, and no resources were found nearby.\nAction Requested: Please add this zip code to the database, and look into resource coverage for this area. Flagging in case this is a data gap.`
 };
 
-const STATE_TO_HUB = {
-  GA: 'Atlanta, GA', MD: 'Baltimore, MD', MA: 'Boston, MA', NC: 'Charlotte, NC',
-  OH: 'Columbus, OH', MI: 'Detroit, MI', FL: 'Tampa, FL', DC: 'Washington, DC',
-  VA: 'Washington, DC', NY: 'New York, NY', PA: 'Philadelphia, PA'
+const US_STATES = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia',
+  FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois',
+  IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana',
+  ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota',
+  MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada',
+  NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York',
+  NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon',
+  PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota',
+  TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia',
+  WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming'
 };
 
-function guessHubCity(address) {
+// Crossing state lines makes a client out of region, except in the DMV. Each
+// covered state lists the city (or cities) we measure driving distance to.
+// NJ is fully covered and handled separately, so it's not listed here.
+const STATE_TO_HUBS = {
+  DC: ['Washington, DC'], VA: ['Washington, DC'], MD: ['Washington, DC', 'Baltimore, MD'],
+  GA: ['Atlanta, GA'], MA: ['Boston, MA'], NC: ['Charlotte, NC'], OH: ['Columbus, OH'],
+  MI: ['Detroit, MI'], FL: ['Tampa, FL'], NY: ['New York, NY'], PA: ['Philadelphia, PA']
+};
+
+// Full state names, longest first, so "West Virginia" wins over "Virginia".
+const STATE_NAMES = Object.entries(US_STATES)
+  .map(([code, name]) => [name.toLowerCase(), code])
+  .concat([['washington dc', 'DC']])
+  .sort((a, b) => b[0].length - a[0].length);
+
+// Reads the state from where it sits in a US address: the last comma-separated
+// part, right before the zip. Looking only there keeps street names like
+// "Pennsylvania Ave" from being read as the state. Returns a code like "DE",
+// or null when it can't tell, so the specialist picks instead of us guessing.
+function stateFromAddress(address) {
   if (!address) return null;
-  if (/\bNJ\b/i.test(address) || /new jersey/i.test(address)) return 'NJ';
-  const match = address.match(/\b([A-Z]{2})\b(?!.*\b[A-Z]{2}\b)/);
-  if (match && STATE_TO_HUB[match[1].toUpperCase()]) return STATE_TO_HUB[match[1].toUpperCase()];
-  const stateNames = { georgia: 'GA', maryland: 'MD', massachusetts: 'MA', 'north carolina': 'NC',
-    ohio: 'OH', michigan: 'MI', florida: 'FL', 'washington dc': 'DC', virginia: 'VA', 'new york': 'NY', pennsylvania: 'PA' };
-  const lower = address.toLowerCase();
-  for (const name in stateNames) {
-    if (lower.includes(name)) return STATE_TO_HUB[stateNames[name]];
+  const cleaned = address
+    .replace(/(?:,\s*|\s+)(?:u\.?s\.?a?\.?|united states(?: of america)?)\s*$/i, '')
+    .replace(/\./g, '')
+    .trim();
+  const parts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  const lastPart = parts[parts.length - 1];
+  const tail = lastPart.replace(/\s*\b\d{5}(?:-\d{4})?$/, '').trim();
+  if (!tail) return null;
+
+  const lowerTail = tail.toLowerCase();
+  for (const [name, code] of STATE_NAMES) {
+    if (lowerTail === name || lowerTail.endsWith(' ' + name)) return code;
   }
+
+  // A 2-letter code counts if it's its own part ("…, DE 19709") or is written
+  // in capitals ("Middletown DE"). That rules out things like "123 Oak Ct".
+  const token = tail.match(/(?:^|\s)([A-Za-z]{2})$/);
+  if (!token) return null;
+  const code = token[1].toUpperCase();
+  if (!US_STATES[code]) return null;
+  if (tail.length === 2 || token[1] === code) return code;
   return null;
 }
 
-// Rough reference zip for each hub, used only to rank which hubs are numerically
-// closest to the client's zip. Zip codes trend geographically across the US, so
-// this is a fair proxy without needing real coordinates or a network call.
-const HUB_REFERENCE_ZIPS = {
-  'Boston, MA': 2108, 'New York, NY': 10001, 'Philadelphia, PA': 19101,
-  'Baltimore, MD': 21201, 'Washington, DC': 20001, 'Charlotte, NC': 28202,
-  'Atlanta, GA': 30301, 'Tampa, FL': 33601, 'Columbus, OH': 43201, 'Detroit, MI': 48201
-};
-
-// Close-in DC suburbs whose state would otherwise route them to the wrong hub
-// (e.g. Montgomery/PG County, MD gets mapped to Baltimore by state alone, even
-// though DC is much closer). Listed by zip3 (first 3 digits of the zip code).
-// DC proper: 200-205. Montgomery & Prince George's County, MD: 207-209.
-// Arlington, Alexandria, Fairfax, VA: 220-223.
-const DMV_ZIP3 = new Set([200, 201, 202, 203, 204, 205, 207, 208, 209, 220, 221, 222, 223]);
-
-function isDmvZip(zip) {
-  return DMV_ZIP3.has(Math.floor(zip / 100));
+function regionRuleForState(code) {
+  if (!code) return { kind: 'unknown' };
+  if (code === 'NJ') return { kind: 'nj' };
+  if (!STATE_TO_HUBS[code]) return { kind: 'not-covered' };
+  return { kind: 'distance', hubs: STATE_TO_HUBS[code] };
 }
 
 function getDrivingRoute(addressA, addressB) {
@@ -456,41 +484,6 @@ function getDrivingRoute(addressA, addressB) {
       resolve(null);
     }
   });
-}
-
-function suggestHubCities(address) {
-  if (!address) return [];
-  const primary = guessHubCity(address);
-  if (primary === 'NJ') return ['NJ'];
-
-  const zipMatch = address.match(/\b(\d{5})\b/);
-  if (!zipMatch) return primary ? [primary] : [];
-
-  const clientZip = parseInt(zipMatch[1], 10);
-
-  // Close-in DC suburb, regardless of what the state alone would suggest.
-  if (isDmvZip(clientZip) && primary !== 'Washington, DC') {
-    return primary ? ['Washington, DC', primary] : ['Washington, DC'];
-  }
-
-  const ranked = Object.entries(HUB_REFERENCE_ZIPS)
-    .map(([city, zip]) => ({ city, diff: Math.abs(zip - clientZip) }))
-    .sort((a, b) => a.diff - b.diff);
-
-  if (!primary) {
-    // No state match at all, fall back to zip proximity alone, clearly an estimate.
-    return ranked.slice(0, 2).map(x => x.city);
-  }
-
-  // State match is the reliable pick. Only add a second suggestion if some other
-  // hub is close enough by zip that it's worth a specialist double-checking,
-  // rather than trusting raw zip math to override a known-correct state mapping.
-  const closestOther = ranked.find(r => r.city !== primary);
-  const primaryDiff = ranked.find(r => r.city === primary)?.diff ?? Infinity;
-  if (closestOther && closestOther.diff < primaryDiff * 0.6) {
-    return [primary, closestOther.city];
-  }
-  return [primary];
 }
 
 function trackEvent(name, props) {
@@ -582,118 +575,170 @@ function render() {
     restart.className = 'restart-btn';
     restart.textContent = 'Start over';
     restart.style.marginTop = '12px';
-    restart.onclick = () => { state.history = []; state.step = 'address'; state.travelMode = null; state.travelCutoff = null; state.backstopMiles = null; state.calculatedMiles = null; state.clientAddr = null; state.destCity = null; state.destCustom = null; state.mapShown = false; render(); };
+    restart.onclick = () => { state.history = []; state.step = 'address'; state.travelMode = null; state.travelCutoff = null; state.backstopMiles = null; state.calculatedMiles = null; state.clientAddr = null; state.destCity = null; state.clientState = null; state.clientStateSource = null; state.mapShown = false; render(); };
     card.appendChild(restart);
   }
 
   else if (state.step === 'distance') {
-    if (!state.destCity) state.destCity = 'Atlanta, GA';
     const questionText = `Is the client's address more than 50 miles from our nearest region?`;
+    const stateOptions = Object.entries(US_STATES)
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([code, name]) => `<option value="${code}">${name} (${code})</option>`).join('');
     card.innerHTML = `
       <div class="zip-chip red"><span class="dot"></span>Zip flagged</div>
       <div class="step-label">Step 4 · Check the distance</div>
       <p class="question">${questionText}</p>
-      <p class="helper-text">Enter the client's address, pick the closest covered city, and the tool calculates the distance automatically, no traffic factored in.</p>
+      <p class="helper-text">Enter the client's address. Crossing state lines makes a client out of region, except in the DMV, so the tool reads the state and checks driving distance only to that state's covered city, no traffic factored in.</p>
 
       <div style="margin-bottom:10px;">
         <label style="font-size:13px; font-weight:600; color:var(--ink-soft); display:block; margin-bottom:4px;">Client's address</label>
-        <input type="text" id="client-addr" placeholder="e.g. 142 Elm St, Reading, PA" value="${state.clientAddr || ''}"
+        <input type="text" id="client-addr" placeholder="e.g. 142 Elm St, Reading, PA"
           style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit;">
       </div>
 
       <div style="margin-bottom:14px;">
-        <label style="font-size:13px; font-weight:600; color:var(--ink-soft); display:block; margin-bottom:4px;">Closest covered city</label>
-        <select id="dest-city" style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit; background:var(--paper);">
-          ${[['Atlanta, GA','Atlanta, GA'],['Baltimore, MD','Baltimore, MD'],['Boston, MA','Boston, MA'],['Charlotte, NC','Charlotte, NC'],['Columbus, OH','Columbus, OH'],['Detroit, MI','Detroit, MI'],['Tampa, FL','Tampa, FL'],['Washington, DC','Washington, DC (or nearby VA/MD)'],['New York, NY','New York, NY'],['Philadelphia, PA','Philadelphia, PA']]
-            .map(([val, label]) => `<option value="${val}" ${state.destCity === val ? 'selected' : ''}>${label}</option>`).join('')}
-          <option value="custom" ${state.destCity === 'custom' ? 'selected' : ''}>All of NJ — type nearest NJ city</option>
+        <label style="font-size:13px; font-weight:600; color:var(--ink-soft); display:block; margin-bottom:4px;">Client's state</label>
+        <select id="client-state" style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit; background:var(--paper);">
+          <option value="">Pick the client's state</option>
+          ${stateOptions}
         </select>
-        <input type="text" id="dest-custom" placeholder="e.g. Trenton, NJ" value="${state.destCustom || ''}"
-          style="width:100%; margin-top:8px; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit; ${state.destCity === 'custom' ? '' : 'display:none;'}">
-        <p id="dest-suggestion" style="font-size:12.5px; color:var(--green-soft); margin:6px 0 0; display:none;"></p>
+        <p id="state-status" style="font-size:12.5px; margin:6px 0 0; display:none;"></p>
       </div>
 
-      <button class="copy-btn" id="show-route-btn" style="margin-bottom:14px; background:var(--citrus-dark);">Check driving distance</button>
+      <button class="copy-btn" id="show-route-btn" style="margin-bottom:14px; background:var(--citrus-dark); display:none;">Check driving distance</button>
+      <button class="copy-btn" id="state-continue-btn" style="margin-bottom:14px; display:none;">Continue</button>
 
       <div id="map-holder"></div>
     `;
 
-    const destSelect = card.querySelector('#dest-city');
-    const destCustom = card.querySelector('#dest-custom');
     const clientAddrInput = card.querySelector('#client-addr');
-    const destSuggestion = card.querySelector('#dest-suggestion');
-    destSelect.addEventListener('change', () => {
-      state.destCity = destSelect.value;
-      destCustom.style.display = destSelect.value === 'custom' ? 'block' : 'none';
-    });
-    const runAddressSuggestion = () => {
-      const suggestions = suggestHubCities(clientAddrInput.value.trim());
-      if (suggestions.length === 0) {
-        destSuggestion.style.display = 'none';
-        return;
-      }
-      if (suggestions[0] === 'NJ') {
-        destSelect.value = 'custom';
-        state.destCity = 'custom';
-        destCustom.style.display = 'block';
-        destSuggestion.textContent = `This looks like a New Jersey address, all of NJ is covered, type the nearest NJ city above.`;
-        destSuggestion.style.display = 'block';
-        return;
-      }
-      const top = suggestions[0];
-      if ([...destSelect.options].some(o => o.value === top)) {
-        destSelect.value = top;
-        state.destCity = top;
-        destCustom.style.display = 'none';
-      }
-      destSuggestion.textContent = suggestions.length > 1
-        ? `Closest matches: ${suggestions.join(' or ')}. Set to "${top}", adjust if the other fits better.`
-        : `Suggested "${top}" based on the address, feel free to adjust.`;
-      destSuggestion.style.display = 'block';
+    const stateSelect = card.querySelector('#client-state');
+    const stateStatus = card.querySelector('#state-status');
+    const routeBtn = card.querySelector('#show-route-btn');
+    const continueBtn = card.querySelector('#state-continue-btn');
+    const mapHolder = card.querySelector('#map-holder');
+    clientAddrInput.value = state.clientAddr || '';
+    stateSelect.value = state.clientState || '';
+
+    const showStatus = (text, color) => {
+      stateStatus.textContent = text;
+      stateStatus.style.color = color;
+      stateStatus.style.display = text ? 'block' : 'none';
     };
+
+    // Shows what happens next for the selected state, and only the button that fits.
+    const updateForState = () => {
+      const rule = regionRuleForState(state.clientState);
+      routeBtn.style.display = rule.kind === 'distance' ? 'block' : 'none';
+      continueBtn.style.display = rule.kind === 'nj' || rule.kind === 'not-covered' ? 'block' : 'none';
+      if (rule.kind === 'unknown') {
+        showStatus(clientAddrInput.value.trim()
+          ? 'Couldn’t read the state from this address. Pick the client’s state above.'
+          : '', 'var(--red)');
+      } else if (rule.kind === 'nj') {
+        showStatus('All of New Jersey is covered, so there’s no distance check. Continue to the New Jersey steps.', 'var(--green-soft)');
+      } else if (rule.kind === 'not-covered') {
+        showStatus(`${US_STATES[state.clientState]} isn’t a state we cover, so this client is out of region. No distance check needed.`, 'var(--red)');
+      } else if (rule.hubs.length > 1) {
+        showStatus(`DMV area: checks driving distance to both ${rule.hubs.join(' and ')}, and uses the closer one.`, 'var(--green-soft)');
+      } else {
+        showStatus(`Checks driving distance to ${rule.hubs[0]}.`, 'var(--green-soft)');
+      }
+    };
+
+    // The address decides the state when it names one. If it doesn't, clear a
+    // state that came from an earlier address, but keep one the specialist picked.
+    const runStateCheck = () => {
+      const addr = clientAddrInput.value.trim();
+      state.clientAddr = addr;
+      const found = stateFromAddress(addr);
+      if (found) {
+        state.clientState = found;
+        state.clientStateSource = 'address';
+      } else if (state.clientStateSource === 'address') {
+        state.clientState = null;
+        state.clientStateSource = null;
+      }
+      stateSelect.value = state.clientState || '';
+      updateForState();
+    };
+
+    stateSelect.addEventListener('change', () => {
+      state.clientState = stateSelect.value || null;
+      state.clientStateSource = stateSelect.value ? 'picked' : null;
+      mapHolder.innerHTML = '';
+      updateForState();
+    });
     let addrDebounce;
     clientAddrInput.addEventListener('input', () => {
+      state.clientAddr = clientAddrInput.value.trim();
+      mapHolder.innerHTML = '';
       clearTimeout(addrDebounce);
-      addrDebounce = setTimeout(runAddressSuggestion, 500);
+      addrDebounce = setTimeout(runStateCheck, 500);
     });
     clientAddrInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         clearTimeout(addrDebounce);
-        runAddressSuggestion();
+        runStateCheck();
       }
     });
-    clientAddrInput.addEventListener('blur', runAddressSuggestion);
+    clientAddrInput.addEventListener('blur', () => {
+      clearTimeout(addrDebounce);
+      runStateCheck();
+    });
 
-    card.querySelector('#show-route-btn').addEventListener('click', async () => {
-      const addr = card.querySelector('#client-addr').value.trim();
-      const dest = destSelect.value === 'custom' ? destCustom.value.trim() : destSelect.value;
-      if (!addr || !dest) {
-        card.querySelector('#map-holder').innerHTML = `<p class="helper-text" style="color:var(--red);">Enter both the client's address and the nearest city first.</p>`;
+    // Returning to this step with a saved address: check the state again.
+    if (state.clientAddr) runStateCheck();
+    else updateForState();
+
+    continueBtn.addEventListener('click', () => {
+      const rule = regionRuleForState(state.clientState);
+      if (rule.kind === 'nj') goTo('nj-resources-check');
+      else if (rule.kind === 'not-covered') goTo('oor-state');
+    });
+
+    routeBtn.addEventListener('click', async () => {
+      const addr = clientAddrInput.value.trim();
+      const rule = regionRuleForState(state.clientState);
+      if (!addr || rule.kind !== 'distance') {
+        mapHolder.innerHTML = `<p class="helper-text" style="color:var(--red);">Enter the client's address and make sure their state is set first.</p>`;
         return;
       }
       state.clientAddr = addr;
-      state.destCustom = destCustom.value.trim();
       state.mapShown = true;
 
-      const mapHolder = card.querySelector('#map-holder');
       mapHolder.innerHTML = `<p class="helper-text">Calculating driving distance...</p>`;
-      const route = await getDrivingRoute(addr, dest);
+      // One route per covered city for the state. Only MD has two, run at the same time.
+      const routes = await Promise.all(rule.hubs.map(hub => getDrivingRoute(addr, hub)));
+      const found = rule.hubs
+        .map((hub, i) => ({ hub, route: routes[i] }))
+        .filter(r => r.route);
 
-      if (!route) {
+      if (found.length === 0) {
         mapHolder.innerHTML = `
           <p class="helper-text" style="color:var(--red); margin-bottom:10px;">Couldn't find a driving route between these addresses automatically. Double check the spelling, or try a nearby cross street, then click the button again.</p>
         `;
         return;
       }
 
+      const closest = found.reduce((a, b) => (b.route.miles < a.route.miles ? b : a));
+      const route = closest.route;
       const miles = route.miles;
       state.calculatedMiles = miles;
+      state.destCity = closest.hub;
       const withinRange = miles <= 50;
+      const comparison = rule.hubs.length > 1
+        ? `<br><span style="font-size:13px;">${rule.hubs.map(hub => {
+            const r = found.find(f => f.hub === hub);
+            return r ? `${hub}: ${r.route.miles} miles` : `${hub}: no route found`;
+          }).join(' · ')}</span>`
+        : '';
       mapHolder.innerHTML = `
         <p class="question" style="font-size:16px; margin-bottom:8px;">Is the client's address more than 50 miles from our nearest region?</p>
         <div class="note" style="margin-bottom:14px;">
-          <strong>${miles} miles</strong> driving distance (about ${route.durationText}).
-          ${withinRange ? 'That\u2019s within range.' : 'That\u2019s over the range.'}
+          <strong>${miles} miles</strong> driving distance to ${closest.hub} (about ${route.durationText}).
+          ${withinRange ? 'That’s within range.' : 'That’s over the range.'}
+          ${comparison}
         </div>
         <div id="gmap-canvas" style="width:100%; height:220px; border-radius:8px; overflow:hidden; border:1.5px solid var(--border); margin-bottom:14px;"></div>
         <button class="copy-btn" id="continue-after-distance-btn">Continue</button>
@@ -711,6 +756,21 @@ function render() {
     });
 
     card.appendChild(back());
+  }
+
+  else if (state.step === 'oor-state') {
+    showResult({
+      badge: 'badge-oor',
+      badgeText: 'Process as out of region',
+      title: `${US_STATES[state.clientState] || 'This state'} isn’t a state we cover, process them as out of region.`,
+      steps: [
+        'Crossing state lines makes a client out of region. The only exception is the DMV area (DC, Maryland, and Virginia).',
+        'This applies even if Platform shows resources near the client.',
+        'Click "Process as Out of Region" on the client profile.',
+        'Mia sends the message below automatically, no need to send it yourself.'
+      ],
+      template: { key: 'outOfRegion', label: 'Sent automatically by Mia' }
+    });
   }
 
 
@@ -915,7 +975,7 @@ function showResult({ badge, badgeText, title, steps, template }) {
   restart.textContent = 'Start over with a new client';
   restart.style.marginTop = '14px';
   restart.style.display = 'block';
-  restart.onclick = () => { state.history = []; state.step = 'address'; state.travelMode = null; state.travelCutoff = null; state.backstopMiles = null; state.calculatedMiles = null; state.clientAddr = null; state.destCity = null; state.destCustom = null; state.mapShown = false; render(); };
+  restart.onclick = () => { state.history = []; state.step = 'address'; state.travelMode = null; state.travelCutoff = null; state.backstopMiles = null; state.calculatedMiles = null; state.clientAddr = null; state.destCity = null; state.clientState = null; state.clientStateSource = null; state.mapShown = false; render(); };
   card.appendChild(restart);
   renderRail('result');
 }
